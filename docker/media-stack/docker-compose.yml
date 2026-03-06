@@ -34,14 +34,17 @@ services:
       - OPENVPN_PASSWORD=${PROTON_PASS}
       - SERVER_COUNTRIES=Netherlands
       - TZ=America/New_York
+      - VPN_ENDPOINT_PORT=443
+      - OPENVPN_MSSFIX=1300    
     volumes:
       - /mnt/appdata/gluetun:/gluetun
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://ipinfo.io"]
+      test: ["CMD", "ping", "-c", "1", "-W", "5", "1.1.1.1"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 30s
 
   # === Download Client ===
   qbittorrent:
@@ -146,3 +149,15 @@ services:
     volumes:
       - /mnt/appdata/overseerr:/config
     restart: unless-stopped
+
+  # === Cloudflare Bypass for Prowlarr ===
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - TZ=America/New_York
+    restart: unless-stopped  
