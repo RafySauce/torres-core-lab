@@ -1,0 +1,12 @@
+# Never commit secrets
+*.key
+*.pem
+*.crt
+*.env
+passwords.txt
+secrets/
+.env*
+
+# OS junk
+.DS_Store
+Thumbs.db
