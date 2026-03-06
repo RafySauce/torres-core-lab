@@ -37,6 +37,7 @@ services:
       - VPN_ENDPOINT_PORT=443
       - OPENVPN_MSSFIX=1300    
       - FIREWALL_OUTBOUND_SUBNETS=192.168.50.0/24
+      - VPN_PORT_FORWARDING=on
     volumes:
       - /mnt/appdata/gluetun:/gluetun
     restart: unless-stopped
