@@ -55,8 +55,3 @@ alias gs='git status'
 alias update='sudo apt update && sudo apt upgrade'
 
 export PATH=$PATH:/usr/sbin
-```
-
-Commit and push it. Then get me the raw GitHub URL — it'll look like:
-```
-https://raw.githubusercontent.com/RafySauce/torres-core-lab/refs/heads/main/scripts/bashrc-rafy.sh
