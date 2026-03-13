@@ -171,6 +171,8 @@
 | proxmox-cortana.torres-core.us | 192.168.50.20 |
 | adguard-cortana.torres-core.us | 192.168.50.22 |
 | reolink-nvr.torres-core.us | 192.168.50.24 |
+| docker.torres-core.us | 192.168.50.16 |
+| portainer.torres-core.us | 192.168.50.16 |
 | frigate.torres-core.us | 192.168.50.25 |
 
 ---
@@ -337,7 +339,95 @@ sudo qm start <VMID>
   - rafy added to docker group
 - Installed Portainer CE (latest) — running on port 9443
 - **Verified:** `docker run hello-world` clean, Portainer UI accessible at https://192.168.50.16:9443
-- **TODO:** Mount datapool/appdata via VirtIO-fs before deploying media stack
+- Portainer restart policy set: `docker update --restart unless-stopped portainer`
+
+### 14. Docker VM — VirtIO-fs Media Mount — March 6, 2026
+- Added second VirtIO-fs directory mapping (`media` → `/datapool/media`) on Proxmox host
+- Mounted in Docker VM at `/mnt/media` via virtiofs
+- Added to `/etc/fstab` for persistence: `media /mnt/media virtiofs defaults 0 0`
+- **Verified:** `/mnt/media/movies`, `/mnt/media/tv` accessible from Docker VM
+- Set permissions from Proxmox host: `chown -R 1000:1000` on movies and tv datasets
+
+### 15. Media Automation Stack (Docker VM 104) — March 6, 2026
+- Created `~/media-stack/` project directory with `docker-compose.yml` and `.env`
+- `.env` contains ProtonVPN OpenVPN credentials (gitignored)
+- Committed compose file to `torres-core-lab` GitHub repo under `docker/media-stack/`
+
+**Stack containers (all routed through Gluetun VPN):**
+| Container | Image | Port | Purpose |
+|-----------|-------|------|---------|
+| gluetun | qmcgaw/gluetun | 8000 (control) | VPN gateway — ProtonVPN OpenVPN, Netherlands, port forwarding enabled |
+| qbittorrent | linuxserver/qbittorrent | 8080 | Torrent download client |
+| sonarr | linuxserver/sonarr | 8989 | TV show management — root folder `/tv` |
+| radarr | linuxserver/radarr | 7878 | Movie management — root folder `/movies` |
+| prowlarr | linuxserver/prowlarr | 9696 | Indexer manager — synced to Sonarr + Radarr |
+| bazarr | linuxserver/bazarr | 6767 | Subtitle management — connected to Sonarr + Radarr |
+| overseerr | linuxserver/overseerr | 5055 | Request UI — connected to Plex + Sonarr + Radarr |
+| flaresolverr | flaresolverr/flaresolverr | 8191 | Cloudflare bypass proxy for Prowlarr indexers |
+
+**Gluetun VPN configuration:**
+- Provider: ProtonVPN (Plus plan)
+- Protocol: OpenVPN UDP 1194
+- Country: Netherlands
+- Port forwarding: enabled (NAT-PMP via `+pmp` suffix on username)
+- Forwarded port: dynamic (written to `/tmp/gluetun/forwarded_port`)
+- Kill switch: active — all containers use `network_mode: "service:gluetun"`
+- Local network access: `FIREWALL_OUTBOUND_SUBNETS=192.168.50.0/24` (for Plex/Overseerr connectivity)
+- Healthcheck: ping-based with 30s start period
+
+**Prowlarr indexers configured:**
+- 1337x (with FlareSolverr tag for Cloudflare bypass)
+- EZTV (TV focused)
+- The Pirate Bay
+- LimeTorrents
+
+**Service interconnections:**
+- Prowlarr → Sonarr + Radarr (Full Sync — indexers pushed automatically)
+- Sonarr + Radarr → qBittorrent (download client, localhost:8080)
+- Bazarr → Sonarr + Radarr (API key connection for subtitle matching)
+- Overseerr → Plex (192.168.50.12:32400) + Sonarr + Radarr (request routing)
+
+**qBittorrent settings:**
+- Default save path: `/downloads/complete`
+- Incomplete path: `/downloads/incomplete`
+- Listening port: set to Gluetun forwarded port (dynamic)
+- UPnP/NAT-PMP: disabled (Gluetun handles port forwarding)
+- Seeding ratio limit: configured
+
+**Volume mounts:**
+- `/mnt/appdata/<service>` → container `/config` (persistent config per service)
+- `/mnt/appdata/downloads` → container `/downloads` (shared download directory)
+- `/mnt/media/movies` → Radarr + Bazarr `/movies`
+- `/mnt/media/tv` → Sonarr + Bazarr `/tv`
+
+**DNS rewrites added to AdGuard Home:**
+- `docker.torres-core.us` → 192.168.50.16
+- `portainer.torres-core.us` → 192.168.50.16
+
+**Verified:**
+- VPN tunnel active — public IP in Netherlands (ProtonVPN)
+- Port forwarding working — seeders can connect inbound
+- All 8 container UIs accessible via `docker.torres-core.us:<port>`
+- Full pipeline test: Overseerr request → Radarr search → Prowlarr indexers → qBittorrent download
+- Sonarr and Radarr both connected to qBittorrent as download client
+- Bazarr connected to both Sonarr and Radarr for subtitle automation
+
+**Web UI quick reference:**
+| Service | URL |
+|---------|-----|
+| Portainer | https://docker.torres-core.us:9443 |
+| qBittorrent | http://docker.torres-core.us:8080 |
+| Sonarr | http://docker.torres-core.us:8989 |
+| Radarr | http://docker.torres-core.us:7878 |
+| Prowlarr | http://docker.torres-core.us:9696 |
+| Bazarr | http://docker.torres-core.us:6767 |
+| Overseerr | http://docker.torres-core.us:5055 |
+
+**Known issues / notes:**
+- Gluetun MTU discovery error (`VPN route not found for tun0`) is cosmetic — routing works fine
+- DNS block list download times out on startup occasionally — resolves after tunnel stabilizes
+- Some torrent releases have low seeder health — use Manual Search in Radarr/Sonarr to pick better-seeded alternatives
+- `radarr.servarr.com` update check fails through VPN (non-critical, just a version check)
 
 ---
 
@@ -446,8 +536,8 @@ sudo qm start <VMID>
 | Home automation | 🔄 In progress — HA installed, door sensors paired | Home Assistant | VM 102, n3 |
 | ZFS snapshots | ✅ Done — all datasets covered, timer active | Sanoid | proxmox-n3 host |
 | Docker platform | ✅ Done — Docker 29.3.0 + Portainer CE live | Docker + Portainer | VM 104, n3 |
-| Cloud-init template | ⬜ Next — golden Debian VM for future deployments | Proxmox cloud-init | proxmox-n3 |
-| Media automation stack | ⬜ Planned | Gluetun+qBit+Sonarr+Radarr+Prowlarr+Bazarr+Overseerr | Docker VM 104, n3 |
+| Cloud-init template | ✅ Done — golden Debian 13 image, clone workflow verified | Proxmox cloud-init | VM 9000, proxmox-n3 |
+| Media automation stack | ✅ Running — full pipeline verified, VPN + port forwarding active | Gluetun+qBit+Sonarr+Radarr+Prowlarr+Bazarr+Overseerr+FlareSolverr | Docker VM 104, n3 |
 
 ### Priority 3 — Phase 3 Network
 | Use Case | Status | Service | Platform |
@@ -506,9 +596,11 @@ sudo qm start <VMID>
 4. ✅ Deploy Docker VM (VM 104) — Debian 13, Docker 29.3.0, Portainer CE, static IP .16
 5. ✅ VirtIO-fs mount — datapool/appdata mounted at /mnt/appdata in Docker VM, persists on reboot
 6. ✅ Cloud-init template (VM 9000) — golden Debian 13 image, rafy user, SSH key, figlet MOTD, root SSH disabled, bashrc from GitHub
-7. ⬜ Deploy media automation stack (Gluetun, qBit, Sonarr, Radarr, Prowlarr, Bazarr, Overseerr)
-8. ⬜ Home Assistant: WiFi devices, automations, remaining Zigbee devices
-9. ⬜ Cloudflare Tunnel (deferred — post Docker)
+7. ✅ VirtIO-fs media mount — datapool/media mounted at /mnt/media in Docker VM, persists on reboot
+8. ✅ Deploy media automation stack — Gluetun (ProtonVPN NL + port forwarding), qBittorrent, Sonarr, Radarr, Prowlarr, Bazarr, Overseerr, FlareSolverr — all wired together, full pipeline verified
+9. ✅ DNS rewrites added — docker.torres-core.us + portainer.torres-core.us → .16
+10. ⬜ Home Assistant: WiFi devices, automations, remaining Zigbee devices
+11. ⬜ Cloudflare Tunnel (deferred — post Docker)
 
 ### Phase 3 — Network Segmentation (Weeks 4-8)
 1. Purchase UDR7 + 2× U7 Lite
@@ -589,15 +681,18 @@ sudo qm start <VMID>
 - [ ] Reverse proxy for clean internal hostnames (after Docker VM)
 - [ ] fail2ban on Proxmox host (both nodes)
 - [ ] Automated ZFS scrubs and SMART monitoring (both nodes)
-- [ ] Gluetun VPN kill switch for torrent stack (Phase 2)
+- [x] Gluetun VPN kill switch for torrent stack — active, all containers route through VPN
+- [x] VPN port forwarding enabled (ProtonVPN NAT-PMP)
 
 ---
 
 ## Open TODO
 
 ### Phase 2 (n3 — Next Sessions)
-- [ ] Deploy media automation stack (Gluetun, qBit, Sonarr, Radarr, Prowlarr, Bazarr, Overseerr)
-- [ ] Add docker DNS rewrite to AdGuard (docker.torres-core.us → 192.168.50.16)
+- [x] Deploy media automation stack (Gluetun, qBit, Sonarr, Radarr, Prowlarr, Bazarr, Overseerr)
+- [x] Add docker DNS rewrite to AdGuard (docker.torres-core.us → 192.168.50.16)
+- [ ] Commit updated architecture doc to torres-core-lab GitHub repo
+- [ ] Set up SSH key for Docker VM → GitHub (for direct git operations from server)
 - [ ] Home Assistant: add WiFi devices (smart plugs, bulbs, thermostat)
 - [ ] Home Assistant: pair remaining Zigbee devices
 - [ ] Home Assistant: build automations (door sensors → notifications, lights)
@@ -605,6 +700,8 @@ sudo qm start <VMID>
 - [ ] Inventory all IoT devices (lights, sensors, Alexa units, cameras)
 - [ ] Clean up accidental SSH config file on Proxmox rafy home dir
 - [ ] Cloudflare Tunnel (deferred — post Docker)
+- [ ] Configure anime separate from TV in Sonarr (separate root folder + quality profile)
+- [ ] Revolt self-hosted deployment in Docker VM (see revolt-deployment-plan.docx)
 
 ### Phase 4 (Cortana)
 - [ ] Back up and document Reolink NVR config (camera IPs, stream URLs) before wiping
@@ -624,6 +721,6 @@ sudo qm start <VMID>
 
 ---
 
-*Document version: 7.0 — March 6, 2026 (end of session 3)*
+*Document version: 8.0 — March 6, 2026 (end of session 4 — media automation stack deployed)*
 *Lab domain: torres-core.us*
 *Architecture partner: Claude (Anthropic)*

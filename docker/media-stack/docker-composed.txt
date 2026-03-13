@@ -1,0 +1,177 @@
+---
+# Torres-Core Media Automation Stack v1
+# All traffic routed through Gluetun VPN container
+# Persistent data: /mnt/appdata/<service>
+# Downloads: /mnt/appdata/downloads
+# Media library: /mnt/media (VirtIO-fs from datapool/media)
+
+services:
+  # === VPN Gateway ===
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      # qBittorrent WebUI
+      - 8080:8080
+      # Sonarr
+      - 8989:8989
+      # Radarr
+      - 7878:7878
+      # Prowlarr
+      - 9696:9696
+      # Bazarr
+      - 6767:6767
+      # Overseerr
+      - 5055:5055
+    environment:
+    # Core VPN config
+    - VPN_SERVICE_PROVIDER=protonvpn
+    - OPENVPN_USER=$${OPENVPN_USER}
+    - OPENVPN_PASSWORD=$${OPENVPN_PASSWORD}
+    - SERVER_COUNTRIES=Netherlands
+    - FREE_ONLY=false
+    # Disable IPv6 completely (prevents sitnl_send errors)
+    - VPN_INTERFACE_IPV6=off
+    - FIREWALL_ENABLE_IPV6=off
+    # DNS: use external, skip internal forwarder
+    - DNS_ADDRESS=1.1.1.1,9.9.9.9
+    - DNS_PLAINTEXT_ADDRESS=1.1.1.1
+    # Disable problematic features
+    - UPDATE_PERIOD=0
+    - HEALTH_CHECK_INTERVAL=120s
+    # Firewall: allow local network
+    - FIREWALL_OUTBOUND_SUBNETS=192.168.50.0/24
+    - FIREWALL_VPN_INPUT_PORTS=6969
+    # OpenVPN tweaks to prevent route errors
+    - OPENVPN_VERBOSITY=1
+    - OPENVPN_MSSFIX=1450
+
+    volumes:
+      - /mnt/appdata/gluetun:/gluetun
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ping", "-c", "1", "-W", "5", "1.1.1.1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # === Download Client ===
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+      - WEBUI_PORT=8080
+    volumes:
+      - /mnt/appdata/qbittorrent:/config
+      - /mnt/appdata/downloads:/downloads
+    restart: unless-stopped
+
+  # === TV Show Management ===
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+    volumes:
+      - /mnt/appdata/sonarr:/config
+      - /mnt/appdata/downloads:/downloads
+      - /mnt/media/tv:/tv
+    restart: unless-stopped
+
+  # === Movie Management ===
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+    volumes:
+      - /mnt/appdata/radarr:/config
+      - /mnt/appdata/downloads:/downloads
+      - /mnt/media/movies:/movies
+    restart: unless-stopped
+
+  # === Indexer Manager ===
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+    volumes:
+      - /mnt/appdata/prowlarr:/config
+    restart: unless-stopped
+
+  # === Subtitle Management ===
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+    volumes:
+      - /mnt/appdata/bazarr:/config
+      - /mnt/media/movies:/movies
+      - /mnt/media/tv:/tv
+    restart: unless-stopped
+
+  # === Request Management ===
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:latest
+    container_name: overseerr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+    volumes:
+      - /mnt/appdata/overseerr:/config
+    restart: unless-stopped
+
+  # === Cloudflare Bypass for Prowlarr ===
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      - TZ=America/New_York
+    restart: unless-stopped  
