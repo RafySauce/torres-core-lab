@@ -353,27 +353,37 @@ sudo qm start <VMID>
 - `.env` contains ProtonVPN OpenVPN credentials (gitignored)
 - Committed compose file to `torres-core-lab` GitHub repo under `docker/media-stack/`
 
-**Stack containers (all routed through Gluetun VPN):**
+**Stack containers (standard Docker bridge network — VPN handled at OS level):**
 | Container | Image | Port | Purpose |
 |-----------|-------|------|---------|
-| gluetun | qmcgaw/gluetun | 8000 (control) | VPN gateway — ProtonVPN OpenVPN, Netherlands, port forwarding enabled |
 | qbittorrent | linuxserver/qbittorrent | 8080 | Torrent download client |
 | sonarr | linuxserver/sonarr | 8989 | TV show management — root folder `/tv` |
 | radarr | linuxserver/radarr | 7878 | Movie management — root folder `/movies` |
 | prowlarr | linuxserver/prowlarr | 9696 | Indexer manager — synced to Sonarr + Radarr |
 | bazarr | linuxserver/bazarr | 6767 | Subtitle management — connected to Sonarr + Radarr |
-| overseerr | linuxserver/overseerr | 5055 | Request UI — connected to Plex + Sonarr + Radarr |
+| seerr | ghcr.io/seerr-team/seerr | 5055 | Request UI — replaced Overseerr; correctly mounts `/mnt/appdata/overseerr:/app/config` |
 | flaresolverr | flaresolverr/flaresolverr | 8191 | Cloudflare bypass proxy for Prowlarr indexers |
 
-**Gluetun VPN configuration:**
-- Provider: ProtonVPN (Plus plan)
-- Protocol: OpenVPN UDP 1194
-- Country: Netherlands
-- Port forwarding: enabled (NAT-PMP via `+pmp` suffix on username)
-- Forwarded port: dynamic (written to `/tmp/gluetun/forwarded_port`)
-- Kill switch: active — all containers use `network_mode: "service:gluetun"`
-- Local network access: `FIREWALL_OUTBOUND_SUBNETS=192.168.50.0/24` (for Plex/Overseerr connectivity)
-- Healthcheck: ping-based with 30s start period
+**VPN configuration (OS-level WireGuard):**
+- Gluetun removed — replaced with `wg-quick` + systemd on the Docker VM host
+- Config: `/etc/wireguard/wg0.conf`
+- Provider: ProtonVPN Plus, Netherlands server
+- Protocol: WireGuard, fwmark `0xca6c`
+- Kill switch: iptables rules in PostUp/PreDown — REJECT all OUTPUT not via wg0 except LAN + docker bridge
+- Port forwarding: NAT-PMP via `proton-port-forward.sh` renewal script
+- Watchdog: `wg-watchdog.timer` (30s interval) with `wg-up.sh` / `wg-down.sh` wrappers
+- qBittorrent listening port is dynamic — set automatically by port forwarding script; do not manually change it
+
+**wg0.conf kill switch rules (PostUp):**
+```
+iptables -I OUTPUT ! -o wg0 -m mark ! --mark 0xca6c -m addrtype ! --dst-type LOCAL -j REJECT
+iptables -I OUTPUT -d 192.168.50.0/24 -j ACCEPT
+iptables -I OUTPUT -o docker+ -j ACCEPT
+iptables -I OUTPUT -d 10.2.0.1/32 -j ACCEPT
+iptables -I FORWARD -i docker+ -j ACCEPT
+iptables -I FORWARD -o docker+ -j ACCEPT
+```
+PreDown mirrors PostUp with `-D` (delete) in reverse order.
 
 **Prowlarr indexers configured:**
 - 1337x (with FlareSolverr tag for Cloudflare bypass)
@@ -383,15 +393,22 @@ sudo qm start <VMID>
 
 **Service interconnections:**
 - Prowlarr → Sonarr + Radarr (Full Sync — indexers pushed automatically)
-- Sonarr + Radarr → qBittorrent (download client, localhost:8080)
+- Sonarr + Radarr → qBittorrent (download client)
 - Bazarr → Sonarr + Radarr (API key connection for subtitle matching)
-- Overseerr → Plex (192.168.50.12:32400) + Sonarr + Radarr (request routing)
+- Seerr → Plex (`192.168.50.12:32400`) + Sonarr + Radarr (request routing)
+
+**Critical networking rule — container hostnames:**
+All inter-service connections within the `media-stack_media-stack` Docker network must use container hostnames, NOT `192.168.50.16`. Docker's NAT DNAT rules only apply to traffic arriving from outside the bridge — same-network containers are invisible to each other via the host IP.
+- ✅ Correct: `http://radarr:7878`, `http://sonarr:8989`, `http://qbittorrent:8080`, `http://flaresolverr:8191`
+- ❌ Wrong: `http://192.168.50.16:7878` (times out from inside the same Docker network)
+- Exception: Plex lives on a different host — use `192.168.50.12:32400` for that connection
+- Exception: FlareSolverr proxy URL in Prowlarr requires full URL including scheme: `http://flaresolverr:8191`
 
 **qBittorrent settings:**
 - Default save path: `/downloads/complete`
 - Incomplete path: `/downloads/incomplete`
-- Listening port: set to Gluetun forwarded port (dynamic)
-- UPnP/NAT-PMP: disabled (Gluetun handles port forwarding)
+- Listening port: dynamic — set automatically by `proton-port-forward.sh`; do NOT manually change it
+- UPnP/NAT-PMP: disabled (OS-level WireGuard handles port forwarding)
 - Seeding ratio limit: configured
 
 **Volume mounts:**
@@ -405,10 +422,10 @@ sudo qm start <VMID>
 - `portainer.torres-core.us` → 192.168.50.16
 
 **Verified:**
-- VPN tunnel active — public IP in Netherlands (ProtonVPN)
-- Port forwarding working — seeders can connect inbound
-- All 8 container UIs accessible via `docker.torres-core.us:<port>`
-- Full pipeline test: Overseerr request → Radarr search → Prowlarr indexers → qBittorrent download
+- VPN tunnel active — public IP in Netherlands (ProtonVPN WireGuard)
+- Port forwarding working — NAT-PMP renewal script running
+- All container UIs accessible via `docker.torres-core.us:<port>`
+- Full pipeline test: Seerr request → Radarr/Sonarr → Prowlarr indexers → qBittorrent download (Raiders of the Lost Ark + Only Murders in the Building confirmed)
 - Sonarr and Radarr both connected to qBittorrent as download client
 - Bazarr connected to both Sonarr and Radarr for subtitle automation
 
@@ -421,13 +438,13 @@ sudo qm start <VMID>
 | Radarr | http://docker.torres-core.us:7878 |
 | Prowlarr | http://docker.torres-core.us:9696 |
 | Bazarr | http://docker.torres-core.us:6767 |
-| Overseerr | http://docker.torres-core.us:5055 |
+| Seerr | http://docker.torres-core.us:5055 |
 
 **Known issues / notes:**
-- Gluetun MTU discovery error (`VPN route not found for tun0`) is cosmetic — routing works fine
-- DNS block list download times out on startup occasionally — resolves after tunnel stabilizes
 - Some torrent releases have low seeder health — use Manual Search in Radarr/Sonarr to pick better-seeded alternatives
-- `radarr.servarr.com` update check fails through VPN (non-critical, just a version check)
+- 1337x rate limits (429) under heavy search load — auto-recovers after 15 minutes, normal behavior
+- Sonarr scene mapping may search Spanish titles first for some shows — check language profile in Sonarr → Settings → Profiles
+- Bazarr language profiles need to be configured and assigned to series/movies before subtitle searches trigger — TODO next session
 
 ---
 
@@ -681,16 +698,19 @@ sudo qm start <VMID>
 - [ ] Reverse proxy for clean internal hostnames (after Docker VM)
 - [ ] fail2ban on Proxmox host (both nodes)
 - [ ] Automated ZFS scrubs and SMART monitoring (both nodes)
-- [x] Gluetun VPN kill switch for torrent stack — active, all containers route through VPN
-- [x] VPN port forwarding enabled (ProtonVPN NAT-PMP)
+- [x] OS-level WireGuard kill switch for torrent stack — iptables REJECT on OUTPUT + FORWARD chain exceptions for docker bridge
+- [x] VPN port forwarding enabled (ProtonVPN NAT-PMP renewal script)
 
 ---
 
 ## Open TODO
 
 ### Phase 2 (n3 — Next Sessions)
-- [x] Deploy media automation stack (Gluetun, qBit, Sonarr, Radarr, Prowlarr, Bazarr, Overseerr)
+- [x] Deploy media automation stack (wg-quick WireGuard, qBit, Sonarr, Radarr, Prowlarr, Bazarr, Seerr, FlareSolverr)
 - [x] Add docker DNS rewrite to AdGuard (docker.torres-core.us → 192.168.50.16)
+- [x] Fix inter-container connectivity — all services now use container hostnames instead of host IP
+- [ ] Bazarr: create language profile (English) and assign to all series/movies — subtitle searches not triggering until this is done
+- [ ] Sonarr: check language profile — searching Spanish titles first for some shows
 - [ ] Commit updated architecture doc to torres-core-lab GitHub repo
 - [ ] Set up SSH key for Docker VM → GitHub (for direct git operations from server)
 - [ ] Home Assistant: add WiFi devices (smart plugs, bulbs, thermostat)
@@ -721,6 +741,31 @@ sudo qm start <VMID>
 
 ---
 
-*Document version: 8.0 — March 6, 2026 (end of session 4 — media automation stack deployed)*
+---
+
+## Key Learnings & Gotchas
+
+### Docker Networking
+- **Container hostnames vs host IP**: Containers on the same Docker bridge network must use container hostnames (`http://sonarr:8989`), not the VM's host IP (`192.168.50.16`). Docker's NAT DNAT rules contain a `!bridge-interface` condition — they only apply to traffic arriving from *outside* the bridge. Same-network container traffic bypasses DNAT entirely and times out hitting the host IP.
+- **Exception for external hosts**: Services on other machines (e.g., Plex at `192.168.50.12`) still use their IP — the hostname rule only applies within the same Docker network.
+- **FlareSolverr proxy URL**: Prowlarr's indexer proxy host field requires the full URL including scheme: `http://flaresolverr:8191` — not just `flaresolverr:8191`.
+- **Docker Compose gotchas**: `.env` requires explicit `--env-file .env` flag (not auto-loaded in all contexts); `${}` interpolation in YAML requires `$${}` escaping; anonymous volumes silently override bind mounts.
+
+### WireGuard Kill Switch + Docker
+- **FORWARD chain**: A WireGuard kill switch locking down the OUTPUT chain alone will break Docker container access to the host IP. Container → host traffic goes through the FORWARD chain (not OUTPUT). Must add `iptables -I FORWARD -i docker+ -j ACCEPT` and `-o docker+ -j ACCEPT` in PostUp alongside the OUTPUT exceptions, with matching PreDown deletes in reverse order.
+- **OUTPUT chain exceptions needed**: LAN subnet (`192.168.50.0/24`), docker bridge (`docker+`), and VPN gateway (`10.2.0.1/32`) must all be explicitly allowed before the REJECT rule.
+
+### VPN Protocol
+- **OpenVPN → WireGuard**: ProtonVPN OpenVPN AUTH_FAILED issues were persistent and unresolvable; WireGuard connected first attempt — prefer WireGuard for ProtonVPN going forward.
+- **Gluetun vs OS-level WireGuard**: For a single-VM media stack, Gluetun adds significant complexity (shared network namespace, port mappings on gateway container, Alpine tooling gaps) with no benefit over OS-level `wg-quick`. OS-level is simpler, more debuggable, and more reliable.
+
+### Proxmox
+- **VirtIO-fs + ZFS**: `chown` on ZFS-backed VirtIO-fs mounts must be run from the Proxmox host, not inside the VM.
+- **Cloud-init templates**: bashrc content causes YAML parsing failures when embedded in vendor snippets — host as a separate file and pull via `curl` during `runcmd`.
+- **Proxmox recovery**: GRUB single-user mode (`init=/bin/bash`) is the reliable path for fixing sudo, user permissions, and password issues on VMs.
+
+---
+
+*Document version: 9.0 — March 14, 2026 (session 5 — Gluetun replaced with OS-level WireGuard, Overseerr replaced with Seerr, inter-container networking fixed, full pipeline verified)*
 *Lab domain: torres-core.us*
 *Architecture partner: Claude (Anthropic)*
