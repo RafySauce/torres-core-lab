@@ -9,7 +9,7 @@
 | Phase | Status | Summary |
 |-------|--------|---------|
 | Phase 1 — Quick Wins | ✅ Complete | Proxmox, ZFS, Tailscale, Plex, SSH hardening, travel network |
-| Phase 2 — Core Infrastructure | 🔄 In progress | HA, AdGuard, Sanoid, Docker, media stack |
+| Phase 2 — Core Infrastructure | 🔄 In progress | HA, AdGuard, Sanoid, Docker, media stack, mesh network |
 | Phase 3 — Network Segmentation | ⬜ Planned | UDR7, VLANs, reverse proxy, Cloudflare Tunnel |
 | Phase 4 — Node Expansion | ⬜ Planned | Cortana + Hal, NVR migration, ZFS replication |
 | Phase 5 — Advanced Services | ⬜ Ongoing | Email, monitoring, Vaultwarden, AI agents |
@@ -35,6 +35,15 @@
 - [ ] Set up SSH key for Docker VM → GitHub (direct git operations from server)
 - [ ] Clean up accidental SSH config file on Proxmox `rafy` home dir
 - [ ] Revolt self-hosted deployment on Docker VM (see `revolt-deployment-plan.docx`)
+
+**Mesh network (Buffalo Community Mesh):**
+- [ ] Flash Node 1 (relay) with Meshtastic firmware — place at best available elevated location
+- [ ] Flash Node 2 (mobile A) with Meshtastic firmware — pair to phone, test with Meshtastic app
+- [ ] Flash Node 3 (mobile B) with Meshtastic firmware — pair to second volunteer phone
+- [ ] Test end-to-end: mobile node → relay → home node message relay
+- [ ] Confirm antenna adapter (SMA Male → RP-SMA Female) — check KMR195 cable end before ordering
+- [ ] Mount 5.8dBi fiberglass antenna for Node 0 (currently unconnected)
+- [ ] Add AdGuard DNS rewrite for Nomad Network if exposing on LAN
 
 **Deferred:**
 - [ ] Cloudflare Tunnel — deferred to Phase 3
@@ -87,8 +96,10 @@
 5. ✅ VirtIO-fs mounts — appdata + media in VM, persists on reboot
 6. ✅ Cloud-init template VM 9000 — clone workflow verified (~60s to SSH)
 7. ✅ Media automation stack — WireGuard VPN, full *arr pipeline verified
-8. ⬜ Home Assistant: WiFi devices, automations, remaining Zigbee devices
-9. ⬜ Cloudflare Tunnel (deferred to Phase 3)
+8. ✅ Mesh stack Node 0 — Heltec LoRa32 V3, RNode 1.85, Reticulum + Nomad Network live
+9. ⬜ Mesh stack Nodes 1–3 — Meshtastic relay + mobile nodes
+10. ⬜ Home Assistant: WiFi devices, automations, remaining Zigbee devices
+11. ⬜ Cloudflare Tunnel (deferred to Phase 3)
 
 ### Phase 3 — Network Segmentation ⬜ Planned
 
@@ -120,6 +131,8 @@
 | Round-up savings | Python + Plaid API + Firefly III | Custom agent build |
 | Offsite backup | Backblaze B2 or Cloudflare R2 | Automated script |
 | Media transcoding | Tdarr | Needs Hal online |
+| Mesh node expansion | Meshtastic + Reticulum | Seneca One Tower, building nodes, truck node |
+| Mesh spine | LoRa long-haul | Buffalo → Cincinnati → Franklin TN (long-term) |
 
 ---
 
@@ -135,6 +148,10 @@
 | ZFS snapshots | ✅ Running | Sanoid | proxmox-n3 host |
 | Docker platform | ✅ Running | Docker + Portainer | VM 104 |
 | Media automation | ✅ Running | qBit + *arr + VPN | VM 104 |
+| Mesh backbone | ✅ Running | Reticulum + RNode | VM 104 |
+| Mesh BBS | ✅ Running | Nomad Network | VM 104 |
+| Mesh relay node | ⬜ Pending | Meshtastic | Node 1 (to deploy) |
+| Mesh mobile nodes | ⬜ Pending | Meshtastic | Nodes 2 + 3 |
 | Reverse proxy | ⬜ Planned | NPM or Caddy | VM 104 |
 | VLANs | ⬜ Phase 3 | UDR7 + EdgeSwitch | Network |
 | Cloudflare Tunnel | ⬜ Phase 3 | cloudflared | LXC (planned) |

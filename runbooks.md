@@ -74,6 +74,26 @@ docker compose down && docker compose up -d
 docker compose ps   # verify all running
 ```
 
+### Restart Mesh Stack
+
+```bash
+ssh docker
+cd ~/mesh-stack
+docker compose down && docker compose up -d
+docker compose ps       # both rnsd and nomadnet should show Up
+docker logs rnsd        # look for "RNodeInterface[LoRa32 Home] is configured and powered up"
+```
+
+### Check Mesh Node Status
+
+```bash
+ssh docker
+docker logs rnsd | tail -20
+# Healthy output includes:
+# [Notice] RNodeInterface[LoRa32 Home] is configured and powered up
+# [Notice] Started rnsd version 1.1.4
+```
+
 ### Update Plex
 
 ```bash
@@ -136,6 +156,7 @@ Update the architecture doc version line and last-updated date before committing
 21. Docker VM 104 — Debian 13, Docker Engine 29.3.0, Portainer CE, static .16
 22. VirtIO-fs mounts — `appdata` at `/mnt/appdata`, `media` at `/mnt/media`, both in fstab
 23. Media stack — WireGuard kill switch, qBittorrent, Sonarr, Radarr, Prowlarr, Bazarr, Seerr, FlareSolverr — full pipeline verified
+24. Mesh stack — Heltec LoRa32 V3 flashed with RNode 1.85 firmware, USB passthrough to VM 104 (port 1-4), Reticulum daemon + Nomad Network running in Docker — Node 0 live
 
 ---
 
@@ -179,6 +200,28 @@ Required OUTPUT exceptions before the REJECT rule: LAN subnet (`192.168.50.0/24`
 **Cloud-init vendor snippets:** bashrc content causes YAML parsing failures when embedded directly. Host the bashrc as a separate file and pull it via `curl` in `runcmd`.
 
 **Proxmox recovery:** GRUB single-user mode (`init=/bin/bash`) is the reliable path for fixing sudo, user permissions, and password issues on VMs.
+
+### Mesh Stack (Reticulum + LoRa)
+
+**CP2102 ID collision.** The Heltec LoRa32 V3 and Sonoff ZBDongle-P both use the CP2102 USB-serial chip with identical Vendor/Device ID (`10c4:ea60`). Never add either device to Proxmox USB passthrough by Vendor/Device ID — it will grab both and break Zigbee. Always use **USB Port** passthrough. Sonoff = port `1-6`, LoRa32 = port `1-4`.
+
+**Charge-only USB-C cables are common.** The LoRa32 will power on and display normally on a charge-only cable — the OLED lights up, LED blinks — but the CP2102 serial interface will not enumerate and `lsusb` will not show the device. Always test with a confirmed data cable. Symptom: board appears alive, nothing shows in `dmesg` on plug.
+
+**RNode vs Meshtastic firmware.** The home infrastructure node (Node 0) must run RNode firmware, not Meshtastic. Reticulum's `rnsd` speaks the RNode protocol. Meshtastic firmware on the same board is invisible to `rnsd`. Flash with `rnodeconf --autoinstall`, not the Meshtastic web flasher. Mobile and relay nodes use Meshtastic.
+
+**rnsd "shared instance" warning.** If `rnsd` starts inside a Docker container with `network_mode: host` and another `rnsd` is already running on the VM (e.g. from a manual venv session), the container's instance defers to the host one and won't take over the LoRa interface. Always `pkill -f rnsd` on the VM before starting the Docker stack.
+
+**PYTHONUNBUFFERED=1 is required.** Without it, Python buffers all output and Docker logs appear empty even when rnsd is running correctly. Add `ENV PYTHONUNBUFFERED=1` to the Dockerfile.
+
+**Use a Dockerfile, not `python:3.11-slim` with pip install in CMD.** Running pip install on every container start causes restart loops — the container times out before pip finishes and Docker restarts it, creating an infinite loop. Bake the packages into the image at build time.
+
+**Reticulum config lives in the volume, not on the VM.** The `rns-data` Docker volume is mounted at `/root/.reticulum` inside the container. The config file at `~/.reticulum/config` on the VM is not seen by the container. Copy it in with `docker cp ~/.reticulum/config rnsd:/root/.reticulum/config` after first creating the volume, then restart.
+
+**`/dev/lora32` udev symlink doesn't exist inside Docker containers.** The symlink is created by udev on the VM host, but containers see the raw device name (`/dev/ttyUSB0`). Use `/dev/ttyUSB0` in the Reticulum config when running inside Docker, even if the udev rule maps it to `/dev/lora32` on the VM. The compose file device passthrough maps it correctly:
+```yaml
+devices:
+  - /dev/lora32:/dev/ttyUSB0
+```
 
 ---
 

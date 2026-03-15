@@ -47,7 +47,7 @@ Plex account: lifetime pass linked. ~2TB media transferred from gaming PC.
 | IP | `192.168.50.13` |
 | Type | HAOS 14.2 (q35, OVMF BIOS) |
 | Web UI | http://homeassistant.torres-core.us:8123 |
-| Zigbee | Sonoff ZBDongle-P via USB passthrough (CP210x, ID 10c4:ea60) |
+| Zigbee | Sonoff ZBDongle-P via USB passthrough (CP210x, ID 10c4:ea60, port 1-6) |
 | Integration | ZHA — coordinator TI CC2652P |
 
 **Status:** Installed, door sensors paired via Zigbee.
@@ -120,9 +120,104 @@ Secondary AdGuard instance planned on Cortana (LXC 201, .22) — synced via AdGu
 
 Both entries in `/etc/fstab` for persistence. Ownership set from Proxmox host (`chown -R 1000:1000`) — do not run chown from inside the VM.
 
-**Services running on this VM:** See [media-stack.md](./media-stack.md) for the full stack.
+**Services running on this VM:** See [media-stack.md](./media-stack.md) for the media stack. See mesh stack section below for Reticulum/LoRa.
 
 **Planned:** Revolt self-hosted chat (see `revolt-deployment-plan.docx`), reverse proxy (Nginx Proxy Manager or Caddy).
+
+---
+
+## Mesh Network Stack — Buffalo Community Mesh (VM 104)
+
+Buffalo disaster-resilience LoRa mesh network. Reticulum backbone running on Docker VM with Heltec LoRa32 V3 as the radio interface. Stack location: `~/mesh-stack/` on the Docker VM.
+
+**Hardware:**
+
+| Device | Role | Connection |
+|--------|------|------------|
+| Heltec LoRa32 V3 | Radio interface — Node 0 | USB passthrough, port 1-4, `/dev/ttyUSB0` inside VM |
+| 5.8dBi fiberglass antenna + 20ft KMR195 cable | Home node antenna | SMA Male → RP-SMA Female adapter required |
+
+**Important:** The Sonoff ZBDongle (VM 102) and Heltec LoRa32 share the same CP2102 chip ID (`10c4:ea60`). USB passthrough is configured **by port**, not by Vendor/Device ID, to avoid conflict. Sonoff is on port `1-6`, LoRa32 is on port `1-4`.
+
+**Docker stack (`~/mesh-stack/`):**
+
+| Container | Image | Role |
+|-----------|-------|------|
+| `rnsd` | `mesh-stack-rnsd` | Reticulum daemon — LoRa32 radio + TCP interface |
+| `nomadnet` | `mesh-stack-nomadnet` | Nomad Network — offline BBS / bulletin board |
+
+**Dockerfile** (`~/mesh-stack/Dockerfile`):
+```dockerfile
+FROM python:3.11-slim
+RUN pip install --no-cache-dir rns lxmf nomadnet
+ENV PYTHONUNBUFFERED=1
+CMD ["rnsd", "-v"]
+```
+
+**Reticulum config** (`/root/.reticulum/config` inside rnsd container):
+```toml
+[reticulum]
+  enable_transport = True
+  share_instance = Yes
+
+[interfaces]
+
+  [[LoRa32 Home]]
+    type = RNodeInterface
+    interface_enabled = True
+    port = /dev/ttyUSB0
+    frequency = 915000000
+    bandwidth = 125000
+    txpower = 17
+    spreadingfactor = 8
+    codingrate = 5
+
+  [[TCP Local]]
+    type = TCPServerInterface
+    interface_enabled = True
+    listen_ip = 0.0.0.0
+    listen_port = 4242
+```
+
+**Radio parameters:**
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Frequency | 915 MHz | US ISM band, no license required |
+| Firmware | RNode 1.85 | Not Meshtastic — host-controlled mode |
+| Radio chip | SX1262 | On Heltec V3 |
+| TX power | 17 dBm | Conservative start, max is 22 dBm |
+| Spreading factor | SF8 | Balance of range and speed |
+| Bandwidth | 125 kHz | Standard LoRa |
+
+**Manage the stack:**
+```bash
+ssh docker
+cd ~/mesh-stack
+docker compose ps
+docker compose down && docker compose up -d
+docker logs rnsd
+docker logs nomadnet
+```
+
+**Node inventory (Phase 1):**
+
+| Node | Hardware | Firmware | Status | Role |
+|------|----------|----------|--------|------|
+| Node 0 (home) | Heltec V3 #1 | RNode 1.85 | ✅ Live | Infrastructure backbone |
+| Node 1 (relay) | Heltec V3 #2 | Meshtastic | ⬜ Pending | Elevated relay |
+| Node 2 (mobile A) | Heltec V3 #3 | Meshtastic | ⬜ Pending | Volunteer mobile |
+| Node 3 (mobile B) | Heltec V3 #4 | Meshtastic | ⬜ Pending | Volunteer mobile |
+
+**Phase 1 remaining:**
+- [ ] Flash nodes 2, 3, 4 with Meshtastic firmware
+- [ ] Place relay node (Node 1) at best available elevated location
+- [ ] Test message relay: mobile node → relay → home node
+- [ ] Add AdGuard DNS rewrite for mesh services
+
+**Long-term vision:** Seneca One Tower node (20F+ coverage of entire city), building nodes 2mi north and 2mi east, mobile truck node, eventual Buffalo → Cincinnati → Franklin TN spine.
+
+Full technical plan: `buffalo-mesh-technical-plan.md`. Volunteer overview: `buffalo-mesh-volunteer-overview.md`.
 
 ---
 
@@ -137,4 +232,4 @@ Root Samba access removed. Gaming PC has M: → media, P: → private-media mapp
 
 ---
 
-*Last updated: March 14, 2026*
+*Last updated: March 14, 2026 — v9.1*
