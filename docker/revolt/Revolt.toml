@@ -32,3 +32,11 @@ video_aspect_ratio = [0.3, 10]
 [features.limits.default]
 video_resolution = [1920, 1080]
 video_aspect_ratio = [0.3, 10]
+
+[api.smtp]
+host = "smtp.resend.com"
+port = 465
+username = "resend"
+password = "re_c2yMD85F_BA6QpHkX4UfWG51gjkkA8z2s"
+from_address = "noreply@torres-core.us"
+use_tls = true
