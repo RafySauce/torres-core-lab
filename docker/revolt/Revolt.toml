@@ -1,0 +1,34 @@
+[hosts]
+app = "https://revolt.torres-core.us"
+api = "https://revolt.torres-core.us/api"
+events = "wss://revolt.torres-core.us/ws"
+autumn = "https://revolt.torres-core.us/autumn"
+january = "https://revolt.torres-core.us/january"
+
+[hosts.livekit]
+worldwide = "wss://revolt.torres-core.us/livekit"
+
+[pushd.vapid]
+private_key = "LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IY0NBUUVFSUM3ZTg3emZpbmJRdU5qQ2o3QkJxYmNRMjhvWjFPQXFXcElJN0x0d3laVW1vQW9HQ0NxR1NNNDkKQXdFSG9VUURRZ0FFRjh2djdrVWVMbTMwdDdaSEtVRGluUXJuVVBZTmppNXg4TzFrSEtlbGVzbTYrTy9pU3NocwovMnIvY3pmaWZJeTQ4dGJta0RlVDI4QWFhQ2xuaFBWVzZBPT0KLS0tLS1FTkQgRUMgUFJJVkFURSBLRVktLS0tLQo"
+public_key = "BBfL7-5FHi5t9Le2RylA4p0K51D2DY4ucfDtZBynpXrJuvjv4krIbP9q_3M34nyMuPLW5pA3k9vAGmgpZ4T1Vug"
+
+[files]
+encryption_key = "9bh3SarqMrKqTP6YOumWXFcT2cMP6urMqVAbDhtNKwU="
+
+[api.livekit.nodes.worldwide]
+url = "http://livekit:7880"
+lat = 0.0
+lon = 0.0
+key = "2ce64120c32f"
+secret = "8295608ddd180fb9155805757f86b6bb4eef6ef494060d36"
+
+[api.registration]
+invite_only = true
+
+[features.limits.new_user]
+video_resolution = [1920, 1080]
+video_aspect_ratio = [0.3, 10]
+
+[features.limits.default]
+video_resolution = [1920, 1080]
+video_aspect_ratio = [0.3, 10]

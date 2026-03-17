@@ -1,0 +1,19 @@
+services:
+  caddy:
+    ports: !override
+     - "8880:80"
+
+  database:
+    volumes:
+      - /mnt/appdata/revolt/mongodb:/data/db
+
+  minio:
+    volumes:
+      - /mnt/appdata/revolt/minio:/data
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=eyJhIjoiYzgyNmQxYTQ3NDg0NGE5NjE1MWFlNzgxY2Y1YWY4YmEiLCJ0IjoiZjlmNTZhYmYtMTFkZi00MjE4LWIyZDktYjM3MWRjNzM3YjQ2IiwicyI6IllqY3hOVE13WVdRdE1UY3lZeTAwWldFeExXSmxOV010T1RNMFlUZG1NbVk1TnpSbCJ9
