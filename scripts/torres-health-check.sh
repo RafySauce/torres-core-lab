@@ -153,7 +153,7 @@ else
 fi
 
 # Check specific critical containers
-for ct_id in 100 101 102 103; do
+for ct_id in 100 101 103; do
     CT_STATUS=$(sudo pct status $ct_id 2>/dev/null | grep -o "running\|stopped" || echo "unknown")
     CT_NAME=$(sudo pct config $ct_id 2>/dev/null | grep "hostname:" | awk '{print $2}' || echo "CT$ct_id")
     
